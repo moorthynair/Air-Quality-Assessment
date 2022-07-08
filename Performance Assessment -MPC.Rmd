@@ -1,0 +1,229 @@
+---
+title: "Million Plus City - Patna (Performance Assessment)"
+author: "Moorthy M Nair"
+date: "06/07/2022"
+output: html_document
+---
+
+```{r Initate the Working Directory}
+
+setwd('C:/Users/HP/Desktop/AQ/Performance_Assessment/Air quality')
+p = list.files(getwd())
+p
+```
+
+##Read the libraries
+```{r}
+library(readxl)
+library(dplyr)
+library(tidyverse)
+library(ggplot2)
+library(lubridate)
+library(tidyr)
+library(zoo)
+```
+
+
+```{rCheck for 3 mandatory columns [Date, PM10, PM2.5]}
+
+collection = list()
+for (i in p){
+  data = read_excel(i)
+  data = data[17:dim(data)[1],c(-2)]
+  k =paste(i, 'has a total columns of number', dim(data)[2], sep= " ")
+  collection = append(k, collection)
+  }
+collection %>% unlist()
+```
+
+
+
+```{r Combine the excel sheet for analysis}
+
+AQ_data = lapply(p, function(i){
+  data = read_excel(i)
+  data = data[17:dim(data)[1],c(1,3,4)]
+  colnames(data) = c('Date', 'PM10', 'PM2.5')
+  k = str_split(i, pattern =" ") %>% unlist()
+  data$Station = k[1]
+  data
+})
+
+AQ_data = do.call('rbind.data.frame', AQ_data)
+AQ_data
+```
+
+```{r Assign the appropriate class to the data}
+
+AQ_data[ ,c('PM10','PM2.5')] = apply(AQ_data[ ,c('PM10','PM2.5')], 2, as.numeric)
+AQ_data = AQ_data %>% mutate_if(is.character, as.factor)
+AQ_data$Date = dmy_hm(AQ_data$Date)
+
+tail(AQ_data, 5)
+```
+
+
+```{r Pivot the longer to wider}
+
+AQ_data = AQ_data %>% pivot_wider(id_cols = 'Date', values_from =c('PM10','PM2.5'), names_from = 'Station',names_sep = '_')
+
+tail(AQ_data, 10)
+```
+## Analysis for PM10
+## Choose the columns with PM10 
+```{r : Choose the columns containing the desired pollutant}
+
+AQ_data = AQ_data %>% select(Date, matches('PM10')) %>% filter(Date >= as.Date('2019-04-01') & Date <= as.Date('2022-03-31')) ##Change PM10 to PM2.5 in case of PM2.5 analysis
+
+AQ_data_copy = AQ_data
+
+tail(AQ_data,5)
+```
+
+```{r Calculate the daily mean}
+AQ_data = AQ_data %>% rowwise(Date) %>% summarise(Mean_PM = mean(c_across(everything()), na.rm=TRUE)) %>% mutate(Mean_PM = round(Mean_PM, digits = 2))
+
+AQ_data
+```
+
+```{r Filter the FY data as per the crtiera }
+
+AQ_data = AQ_data %>%  mutate(Month = month(Date),                                                                     Year = year(Date))
+AQ_data
+```
+
+
+```{r Assign the FY Quarters as a seperate columns}
+
+AQ_data = AQ_data %>% mutate(Quarter = case_when( Month %in% c(1,2,3) ~ 'Quarter4',
+                      Month %in% c(4,5,6) ~ 'Quarter1',
+                      Month %in% c(7,8,9) ~ 'Quarter2',
+                      TRUE ~ 'Quarter3')) %>% mutate(Quarter_year = paste(Quarter,Year, sep="_")) %>% select(1,2,6) %>% mutate_if(is.character, as.factor)
+
+AQ_data
+```
+```{r Check for NAN values in dataframe}
+
+colSums(is.na(AQ_data))[2]
+```
+
+## If the nan val is >1
+```{r If the nan val is >1}
+
+AQ_data %>% group_by(Quarter_year) %>% summarise(val = sum(is.na(Mean_PM))) %>% filter(val>0) 
+```
+
+
+```{r: Total number of days for each Finanical year}
+
+numb = AQ_data %>% mutate(FY = case_when(Date >= as.Date('2019-04-01') & Date <= as.Date('2020-03-31') ~ 'FY_2019_2020',Date >= as.Date('2020-04-01') & Date <= as.Date('2021-03-31') ~ 'FY_2020_2021',
+                                  TRUE ~ 'FY_2021_2022')) %>% group_by (FY) %>% count(FY)
+
+numb
+```
+
+
+```{r Day Number as per Finanical Year}
+
+numbs = list()
+for (i in seq(1:length(numb %>% pull(n)))){
+  p = numb %>% pull(n)
+  numb1 = seq(1:p[i])
+  numbs = append(numbs,numb1)
+}
+
+AQ_data['day_numb'] = numbs %>% unlist()
+
+AQ_data
+```
+
+
+##Linear interpolation to fill the missing value 
+##NOTE: Prior to interpolation make sure first and last date values are filled
+```{r :Use only in case of interpolation abiding to the criteria mentioned prior to the chunk}
+##Develop the function
+
+interpolate = function(data){
+
+## Fill missing values
+data$bfill = na.locf(data$Mean_PM, fromLast = TRUE)
+data$ffill = na.locf(data$Mean_PM, fromLast = FALSE)
+
+##bfill
+data$bfill_day = data$day_numb 
+data[is.na(data$Mean_PM), 'bfill_day'] = NA
+data$bfill_day = na.locf(data$bfill_day, fromLast = TRUE)
+
+##ffill
+data$ffill_day = data$day_numb 
+data[is.na(data$Mean_PM), 'ffill_day'] = NA
+data$ffill_day = na.locf(data$ffill_day, fromLast = FALSE)
+
+for (index in index_vals){
+    step1 = data[index, 'ffill']
+    step2 = data[index,'bfill']-data[index, 'ffill']
+    step3 = data[index, 'bfill_day'] - data[index, 'ffill_day']
+    step4 = data[index, 'day_numb']- data[index, 'ffill_day']
+    data[index,'Mean_PM'] = step1 + (step2 /step3)* step4
+  }
+data  %>% mutate(Mean_PM = round(Mean_PM,digits=2)) %>% select(1,2,3)
+}
+
+index_vals = which(is.na(AQ_data$Mean_PM))
+
+if ((length(index_vals)>=1) & (!is.na(AQ_data[c(1,dim(AQ_data)[1]),'Mean_PM']))[1] & (!is.na(AQ_data[c(1,dim(AQ_data)[1]),'Mean_PM']))[2]){
+  AQ_data = interpolate(AQ_data)
+}else if (is.na(AQ_data[c(1,dim(AQ_data)[1]),'Mean_PM'])[1]){ 
+  print('Their exisits NA at the start of the data')
+  }else if (is.na(AQ_data[c(1,dim(AQ_data)[1]),'Mean_PM'])[2]){ 
+  print('Their exisits NA either at the end of the data')
+  }else{
+  AQ_data
+}
+AQ_data
+```
+
+```{r Recheck for NAN values in dataframe}
+
+colSums(is.na(AQ_data))[2]
+```
+```{r Group by Quarter_year and calculate the mean and standard dev}
+
+AQ_data = AQ_data %>% group_by(Quarter_year) %>% mutate(Mean = mean(Mean_PM,na.rm=TRUE), Stdev = sd(Mean_PM,na.rm=TRUE)) %>% mutate_at(vars(Mean, Stdev), ~round(.,digits = 2))
+
+AQ_data
+```
+
+```{r Check for outliers}
+AQ_data = AQ_data %>% mutate(Difference = Mean - Mean_PM) %>% mutate(Outlier = if_else((Difference <= 2*Stdev) & (Difference >= -2*Stdev), 'No', 'Yes'))
+
+AQ_data
+```
+
+
+##Assign the respective FY (FY 2019-20, FY 2020-21 & FY 2021-22)
+##In case of including additional FY, changes must be made in the code below
+```{r: Assign the Finanical year}
+AQ_data = AQ_data %>% mutate(FY = case_when(Date >= as.Date('2019-04-01') & Date <= as.Date('2020-03-31') ~ 'FY_2019_2020',Date >= as.Date('2020-04-01') & Date <= as.Date('2021-03-31') ~ 'FY_2020_2021',
+                                  TRUE ~ 'FY_2021_2022'))
+
+tail(AQ_data,10)
+```
+
+```{r Count the outliers}
+AQ_data %>% group_by(Outlier) %>% count()
+```
+
+```{r Drop outliers & Compute the Mean of the pollutant for each FY}
+
+AQ_data %>% filter(Outlier !='Yes') %>% group_by(FY) %>% summarise(Mean_PM = mean(Mean_PM))
+```
+
+```{r Computes the total good days [PM10 <251] for each FY. Note only advisable for PM10}
+
+AQ_data %>% filter(Mean_PM <= 250 & Outlier =='No') %>% group_by(FY) %>% count(name ='Total Good Days') %>% left_join(AQ_data %>% filter(Outlier =='No') %>% group_by(FY) %>% count(name ='Total Observed Days'), by = 'FY')
+```
+
+
+
+
