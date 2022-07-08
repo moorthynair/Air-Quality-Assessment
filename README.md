@@ -6,7 +6,7 @@ The code can be used to perform assessment on air quality of Million Plus cities
 # Essential steps to be taken into account while using the R-Markdown
 1. Make sure a seperate folder is created with all the air quality data downlaoded from the CPCB website
 2. Set the working directory according (Chunk 1: Initate the Working Directory)
-3. Make sure you have all the columns namely Date, PM2.5, PM10 or else add the missing columns manually (Chunk 3:Check for 3 mandatory columns [Date, PM10, PM2.5])
+3. Make sure you have all the columns namely Date, PM2.5, PM10 or else add the missing columns manually (Chunk 3: Check for 3 mandatory columns [Date, PM10, PM2.5])
 4. Choose the desired pollutant either PM10 or PM2.5 (Chunk 7:Choose the columns containing the desired pollutant)
 5. Assign the Finanical year (Chunk 12: Total number of days for each Finanical Year (FY))
 6. Assign the Finanical year (Chunk 19: Assign the Finanical Year (FY))
