@@ -1,0 +1,485 @@
+---
+title: "Air Quality Assessment for the cities in India"
+subtitle: 'Test run on PM2.5 pollutant from 6 Station of Patna city of Bihar'
+author: "Moorthy M Nair"
+date: "06/07/2022"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+**The markdown utilises Continuous Ambient Air Quality Monitoring Stations (CAAQMS) information from central server of Central Pollution Control Board (CPCB), India to analyse the efficacy of city specific ground implementation measures on Air Quality (AQ)through robust air quality data analysis. It is envisaged that the analysis shall be instrumental for the decision makers at city level in scaling up the implementation measures.**
+
+[**Understanding the strategy applied in analyzing the AQ dataset.**]{.underline}
+
+1.  Dataset (24 Hrs average) are downloaded from (<https://app.cpcbccr.com/ccr/#/caaqm-dashboard-all/caaqm-landing>)
+
+2.  Analysis are limited to PM~10~ and PM~2.5~
+
+3.  Analysis is carried out with respect to Financial Year (April to March)
+
+4.  A Minimum of 75% data requirement in each quarter and FY is considered as pre-requisites
+
+5.  In between missing values are interpolated using Linear Interpolation method
+
+6.  In case of missing value at the start date of the range, A average of first 30 days shall be used to replace the missing value. In case of missing value at the end date of the range, average of last 30 days shall be used as its replacement
+
+7.  Data missing consecutively for more than 30 days were eliminated for the assessment
+
+8.  Outliers were assessed on Quarterly basis (2\*S.D \> Mean Value - Daily Value \> -2\*S.D)
+
+9.  Air Quality Index (AQI) \<= 250 and AQI \<=90 is considered as good days for PM~10~ and PM~2.5~ sub index respectively. However, their might be mismatch in total number of good days when compared against both the sub index and this uncertanity shall be considered judiciously in decision making process.
+
+[**Mandatory user inputs for the Markdown**]{.underline}
+
+1.  Chunk 1: Initiate the Working Directory . Users shall input the following
+
+    a)  Path: The path where CAAQMS retrieved data are stored
+
+    b)  Pollutants that you wish to analyse (PM~10~ or PM~2.5~; One at a time)
+
+    c)  Start and End date of the FY for the analysis
+
+2.  Chunk 10: Initiate the FY . User shall assign the respective FY accordingly in case of any changes from those mentioned in the chunk.
+
+**Note:** It is highly suggested to run the chunk of code one at a time for better understanding of the assessment.
+
+Github link for the markdown: <https://github.com/moorthynair/Air-Quality-Assessment>
+
+***`In case of any issues identified please feel free to write to moorthymnair@yahoo.in`***
+
+```{r Initate the Working Directory}
+path = "C:/Users/USER/Downloads/Patna" ##Input path of the data
+pollutants = 'PM2.5' ## Criteria pollutant to be analysed
+Startdate = as.Date('2019-04-01') ## Start date of analysis
+Enddate = as.Date('2023-03-31') ## End date of analysis
+```
+
+```{r, include= FALSE}
+setwd(path )
+p = list.files(getwd())
+p
+```
+
+[**At the outset, Lets read the essential libraries.**]{.underline}
+
+```{r label = 'Read the essential libraries', message=FALSE, warning=FALSE}
+##Ensure libraries are installed prior to running this chunk of code
+library(rmarkdown)
+library(readxl)
+library(dplyr)
+library(tidyverse)
+library(ggplot2)
+library(lubridate)
+library(tidyr)
+library(zoo)
+library(ggrepel)
+library(knitr)
+opts_chunk$set(tidy.opts=list(width.cutoff=40),tidy=TRUE)
+```
+
+```{r Check for 3 mandatory columns Date, PM10, PM2.5, include= FALSE }
+setwd(path)
+collection = list()
+stations = list()
+for (i in p){
+  data = read_excel(i)
+  station = pull(data[4,2])
+  col_names = paste(data[12, -2], collapse = ",")
+  data = data[13:dim(data)[1],c(-2)]
+  k =paste(station, ' has a total columns of number: ', dim(data)[2],'-', '[',col_names,']', sep= "")
+  collection = append(k, collection)
+  stations = append(stations,station)  
+}
+
+```
+
+[**Let's check for 3 Mandatory columns prior to initiating the analysis (Date, PM2.5 and PM10). In case of absence of analyser in a particular station, it is suggested to fill the column with NaN values.**]{.underline}
+
+```{r label = 'Check for mandatory columns Date, PM10, PM2.5', warning =FALSE, error = FALSE}
+collection %>% unlist() %>% kable()
+```
+
+[**Let us know first the names of the CAAQMS that are used in the Analysis.**]{.underline}
+
+```{r labels = 'Details of CAQQMS'}
+stations %>% unlist() %>% data.frame(row.names = seq(1:length(stations))) %>% rename('Stations'=1) %>% kable()
+
+```
+
+```{r label = 'Combine the excel sheet for analysis',include=FALSE}
+
+AQ_data = lapply(p, function(i){
+  setwd(path)
+  data = read_excel(i)
+  station = pull(data[4,2])
+  colnames(data) = data[12, ]
+  data = data[13:dim(data)[1],c(-2)]
+  data = data %>% rename('Date'=1)
+  data = data %>% select(Date, PM10, PM2.5)
+  k = str_split(i, pattern =" ") %>% unlist()
+  data$Station = station
+  data
+})
+
+AQ_data = do.call('rbind.data.frame', AQ_data)
+AQ_data 
+```
+
+```{r Assign the appropriate class to the data, include = FALSE}
+
+AQ_data[ ,c('PM10','PM2.5')] = apply(AQ_data[ ,c('PM10','PM2.5')], 2, as.numeric)
+AQ_data = AQ_data %>% mutate_if(is.character, as.factor)
+AQ_data$Date = dmy_hm(AQ_data$Date)
+
+AQ_data
+```
+
+```{r Pivot the longer to wider, include = FALSE}
+
+AQ_data = AQ_data %>% pivot_wider(id_cols = 'Date', values_from =c('PM10','PM2.5'), names_from = 'Station',names_sep = '_') %>% filter(Date >= Startdate & Date<=Enddate)
+
+AQ_data
+
+```
+
+[**Analyzing the pollution concentration of the city.**]{.underline}
+
+```{r label = 'Choose the columns containing the desired pollutant', include = FALSE}
+
+AQ_data = AQ_data %>% select(Date, matches(pollutants)) 
+##Change PM10 to PM2.5 in case of PM2.5 analysis
+
+AQ_data_copy = AQ_data
+
+AQ_data
+```
+
+[**Let's have a look at the summary of the pollutant to be analysed for a city over a certain period as desired.**]{.underline}
+
+```{r label ='Calculate the daily mean', message=FALSE, error=FALSE}
+AQ_data = AQ_data %>% rowwise(Date) %>% summarise(Mean_PM = mean(c_across(everything()), na.rm=TRUE)) %>% mutate(Mean_PM = round(Mean_PM, digits = 2))
+
+summary(AQ_data$Mean_PM)
+```
+
+[**\*\*Very important step**]{.underline}
+
+[**Assign the respective Financial Years (FY 2019-20, FY 2020-21 & FY 2021-22) as required for the analysis.**]{.underline}
+
+[**In case of including additional FY, changes must be made in the code below.**]{.underline}
+
+```{r label = 'Initiate the FY'}
+AQ_data = AQ_data %>%  mutate(FY = case_when(Date >= as.Date('2018-04-01') & Date <= as.Date('2019-03-31') ~ 'FY_2018_2019',Date >= as.Date('2019-04-01') & Date <= as.Date('2020-03-31') ~ 'FY_2019_2020',Date >= as.Date('2020-04-01') & Date <= as.Date('2021-03-31') ~ 'FY_2020_2021', Date >= as.Date('2021-04-01') & Date <= as.Date('2022-03-31') ~ 'FY_2021_2022',
+                                  TRUE ~ 'FY_2022_2023'))
+AQ_data_FY = AQ_data
+```
+
+[**Let us now have check at the missing value for each FY years. We have assumed a Maximum of 25% as threshold. Unavailability above the threshold shall not be included in the analysis.**]{.underline}
+
+```{r label = 'Missing percent graph for each FY over the city'}
+
+##Develop the missing information dataframe by performing essential mathematical calculations
+miss_data = AQ_data %>% group_by(FY) %>% summarise(Missing_Percent = sum(is.na(Mean_PM)*100/n()),total_days_with_values = sum(!is.na(Mean_PM)),              total_days = n()) %>% mutate_if(is.character, as.factor)
+
+##Plotting the graph
+ggplot(miss_data %>% mutate_at(vars(Missing_Percent), ~.x/100), aes(x = FY, y= Missing_Percent))+geom_col(col = 'black', fill = 'blue', alpha=0.6)+geom_hline(aes(yintercept=0.25), lty =2, col='red', lwd=1.2)+scale_y_continuous(labels = scales::label_percent())+ ggtitle(label = 'Missing Informations over the FY')+
+  geom_text(aes(label = 'Threshold', y = 0.28, x = 4.2), size=5)+theme_bw()+theme(axis.text = element_text(face = 'bold', color='black'),axis.title = element_text(face = 'bold', color='black'), plot.title = element_text(hjust=0.5, face = 'bold', size=12, color='black'))
+```
+
+```{r label = 'preprocessing function', include = FALSE}
+#Perform Pre-processing making the data suitable for interpolation
+preprocessing = function(data){
+
+##Add the sequence
+data$day_numb = seq(1:dim(data)[1])
+
+##bfill
+data$bfill_day = data$day_numb 
+data[is.na(data$Mean_PM), 'bfill_day'] = NA
+if(is.na(data[dim(data)[1], 'Mean_PM'])){
+  data[dim(data)[1], 'bfill_day']=data[dim(data)[1],'day_numb']+1
+  }
+data$bfill_day = na.locf(data$bfill_day, fromLast = TRUE)
+
+##ffill
+data$ffill_day = data$day_numb 
+data[is.na(data$Mean_PM), 'ffill_day'] = NA
+if(is.na(data[1, 'Mean_PM'])){
+  data[1, 'ffill_day']=data[1,'day_numb']-1
+  }
+data$ffill_day = na.locf(data$ffill_day, fromLast = FALSE)
+
+##Consectuive Missing value
+data['Consecutive_Missing'] = data['bfill_day'] - data['ffill_day']
+
+
+start = which((data$Consecutive_Missing<30))[1]
+end = rev(which((data$Consecutive_Missing<30)))[1]
+
+data = data[start:end, ]
+
+data %>% select(1:3)
+}
+```
+
+```{r label = 'function for interpolation of missing value', include =FALSE}
+
+#Develop Linear interpolation function to fill the missing value
+interpolate = function(data){
+
+  ##Add the sequence
+  data$day_numb = seq(1:dim(data)[1])
+  
+   ## Fill missing values
+  data$bfill = na.locf(data$Mean_PM, fromLast = TRUE)
+  data$ffill = na.locf(data$Mean_PM, fromLast = FALSE)
+  
+  ##bfill
+  data$bfill_day = data$day_numb 
+  data[is.na(data$Mean_PM), 'bfill_day'] = NA
+  data$bfill_day = na.locf(data$bfill_day, fromLast = TRUE)
+  
+  ##ffill
+  data$ffill_day = data$day_numb 
+  data[is.na(data$Mean_PM), 'ffill_day'] = NA
+  data$ffill_day = na.locf(data$ffill_day, fromLast = FALSE)
+  
+  ##Initiate Consecutive_Missing column
+  data$Consecutive_Missing =0
+  
+  ##Indexes with Missing PM values
+  index_vals = which(is.na(data$Mean_PM))
+
+  for (index in index_vals){
+    step1 = data[index, 'ffill']
+    step2 = data[index,'bfill']-data[index, 'ffill']
+    step3 = data[index, 'bfill_day'] - data[index, 'ffill_day']
+    step4 = data[index, 'day_numb']- data[index, 'ffill_day']
+    data[index,'Mean_PM'] = step1 + (step2 /step3)* step4
+    data[index, 'Consecutive_Missing'] = step3
+  }
+data  %>% mutate(Mean_PM = round(Mean_PM,digits=2)) %>% select(1,2,3,9)
+
+}
+
+```
+
+```{r label = 'Final Processing step', include=FALSE}
+
+#Final processing step in which replace first and last date missing value
+
+final_processing = function (data){
+index_vals = which(is.na(data$Mean_PM))
+if ((length(index_vals)>=1) & (!is.na(data[c(1,dim(data)[1]),'Mean_PM']))[1] & (!is.na(data[c(1,dim(data)[1]),'Mean_PM']))[2]){
+  data = interpolate(data)
+}
+if ((is.na(data[c(1,dim(data)[1]),'Mean_PM'])[1]) & (is.na(data[c(1,dim(data)[1]),'Mean_PM'])[2])){
+  first_value = data[1:30, 'Mean_PM'] %>% summarise(sum = sum(Mean_PM, na.rm=TRUE))
+  end_value = data[dim(data)[1]-30:dim(data)[1], 'Mean_PM'] %>% summarise(sum = sum(Mean_PM, na.rm=TRUE))
+  data[1,'Mean_PM'] = first_value
+  data[dim(data)[1],'Mean_PM'] = end_value
+  data = interpolate(data)
+}
+if (is.na(data[c(1,dim(data)[1]),'Mean_PM'])[1]){
+  first_value = data[1:30, 'Mean_PM'] %>% summarise(sum = sum(Mean_PM, na.rm=TRUE))
+  data[1,'Mean_PM'] = first_value
+  data = interpolate(data)
+}
+if (is.na(data[c(1,dim(data)[1]),'Mean_PM'])[2]){
+  end_value = data[dim(data)[1]-30:dim(data)[1], 'Mean_PM'] %>% summarise(sum = sum(Mean_PM, na.rm=TRUE))
+  data[dim(data)[1],'Mean_PM'] = end_value
+  data = interpolate(data)
+}
+if (length(index_vals)==0){
+  data = interpolate(data)
+}
+data
+}
+
+```
+
+```{r label = 'Applying the functions to our dataset', include=FALSE}
+#Let us apply the above developed functions to our dataset
+AQ_data = preprocessing(AQ_data) %>% final_processing()
+```
+
+```{r label = 'Check for any NaNs', include=FALSE}
+#Check for any NaNs
+which(is.na(AQ_data %>% select(1:3)))
+
+```
+
+```{r label = 'Replacing interpolated PM values having consective NaNs > 30 days', include=FALSE}
+#Now we shall replace interpolated PM value with NaN for those with 30 above consecutive days of missing PM value
+consecutive_nan = function(data){
+data %>% mutate(Mean_PM = replace(Mean_PM, Consecutive_Missing > 30, NA)) %>% select(1,2,3)
+}
+
+AQ_data = consecutive_nan(AQ_data)
+```
+
+```{r label = 'Assign the respective Quarter for the Financial Year', warning=FALSE, error=FALSE ,include=FALSE}
+
+FY_Quarters = function (data){
+ data %>%  mutate(Month = month(Date)) %>% mutate(Quarter = case_when( Month %in% c(1,2,3) ~ 'Quarter4',
+                      Month %in% c(4,5,6) ~ 'Quarter1',
+                      Month %in% c(7,8,9) ~ 'Quarter2',
+                      TRUE ~ 'Quarter3')) %>% mutate(Quarter_year = paste(Quarter,FY, sep="_")) 
+}
+
+AQ_data = FY_Quarters(AQ_data)%>% select(1,2,3,6) %>% mutate_if(is.character, as.factor)
+
+```
+
+```{r label ='Let us identify those Quarters of respective FY with Data Unavailability greater than 25%', include=FALSE, error=FALSE, warning=FALSE, message=FALSE}
+
+AQ_data %>% group_by(Quarter_year) %>% mutate(Data_Unavailability_Percent = sum(is.na(Mean_PM))*100/n(), Data_Unavailability_Percent =round(Data_Unavailability_Percent)) %>% filter(Data_Unavailability_Percent>25) %>% ungroup() %>% select(5) %>% unique()
+
+
+```
+
+```{r label ='Let us first replace PM values with NaNs for those Quarter of respective FY with Data Unavailability greater than 25%. Next, Moving on to the outline detection, let us analyse the Mean and Standard deviation for the each quarters of respective FY', include=FALSE}
+
+Min_quarterly_req = function (data){
+data %>% group_by(Quarter_year) %>% mutate(Data_Unavailability_Percent = sum(is.na(Mean_PM))*100/n(), Data_Unavailability_Percent =round(Data_Unavailability_Percent)) %>% mutate(Mean_PM = replace(Mean_PM, Data_Unavailability_Percent>25, NA)) %>% select(1:4)
+}
+
+
+AQ_data = Min_quarterly_req(AQ_data)
+
+```
+
+```{r label = 'Check for outliers', include=FALSE}
+Outliers = function (data){
+  data = data %>% group_by(Quarter_year) %>% mutate(Mean = mean(Mean_PM,na.rm=TRUE), Stdev = sd(Mean_PM,na.rm=TRUE)) %>% mutate_at(vars(Mean, Stdev), ~round(.,digits = 2))
+  data = data %>% mutate(Difference = Mean - Mean_PM) %>% mutate(Outlier = if_else((Difference <= 2*Stdev) & (Difference >= -2*Stdev), 'No', 'Yes'))
+  
+data %>% mutate(Mean_PM = replace(Mean_PM, Outlier == 'Yes', NA))
+  
+}
+
+AQ_data = Outliers(AQ_data)
+AQ_data %>% group_by(FY, Outlier) %>% count(name = 'Counts') %>% spread(key=Outlier,value =Counts) 
+```
+
+[**Let's remove the outliers and plot the graph for the respective quarters of FY for further interpretation.**]{.underline}
+
+```{r warning=FALSE,fig.height=8,fig.width=8}
+
+AQ_data  %>% filter(Outlier=='No') %>% mutate(Quarter = str_sub(Quarter_year, start=1, end = 8), Mean = mean(Mean_PM, na.rm=TRUE), Mean = round(Mean, digits=2)) %>% ungroup() %>% select(3,5,6,9) %>% unique() %>% ggplot(aes(x=FY, y= Mean))+ geom_point(shape=21, size=5, fill = 'red')+ geom_label_repel(aes(label = Mean), size = 3,fontface = 'bold' )+ geom_line(aes(group=1), lty=2, lwd=1.0)+facet_wrap(~Quarter, scales = 'free_y')+ ggtitle(label = 'Pollutant behaviour in each quarter over the FY') +theme_bw() +theme(axis.text.x = element_text(face='bold', size=8, angle = 90, vjust=0.4), axis.text.y = element_text(face='bold', size=12), strip.text =element_text(face='bold', size=10), plot.title = element_text(hjust=0.5, face = 'bold', size=12, color='black'))
+```
+
+[**Let us find the overall PM trend over the subsequent FY. (Note Data unavailable for greater than 25%of FY shall be eliminated).**]{.underline}
+
+```{r label = 'Drop outliers and Compute the Mean of the pollutant for each FY'}
+
+##Developing dataframe by performing necessary mathematical observations
+obs = AQ_data %>% group_by(FY) %>% summarise(Mean_PM = mean(Mean_PM, na.rm=TRUE), Total_observation = n()) %>% mutate(Mean_PM = round(Mean_PM,2))%>% left_join(AQ_data_FY %>% group_by(FY) %>% count(name = 'Total_Days'), by = 'FY') %>% mutate(Data_availability_percent = Total_observation*100/Total_Days, Data_availability_percent = round(Data_availability_percent)) %>% select(1,2,3,5)%>% mutate_if(is.character, as.factor)
+
+
+##Plotting the graph
+ggplot(obs %>% filter(Data_availability_percent>75), aes(x = FY, y= Mean_PM))+geom_point(fill = 'red',size=5, shape=21, stroke=1.5)+
+  geom_line(aes(group=1), lwd=1.0, lty=2) +geom_label_repel(aes(label = Mean_PM,fontface = 'bold'))+ggtitle(label = 'Pollutant behaviour over the FY')+theme_bw()+theme(axis.text = element_text(face = 'bold', color='black'),axis.title = element_text(face = 'bold', color='black'), plot.title = element_text(hjust=0.5, face = 'bold', size=12, color='black'))
+```
+
+[**Let us now plot the AQI.**]{.underline}
+
+```{r label = 'Air Qaulity Index (Sub-Index)', error=FALSE, warning=FALSE, message=FALSE}
+
+if (pollutants =='PM10'){
+AQ_data %>% filter(Mean_PM <= 250 & Outlier =='No') %>% group_by(FY) %>% count(name ='Good Days') %>% left_join(AQ_data %>% filter(Outlier =='No') %>% group_by(FY) %>% count(name ='Observed Days'), by = 'FY') %>% pivot_longer(cols = 2:3, names_to = 'Observation', values_to = 'Days') %>% mutate_if(is.character, as.factor)%>% ggplot(aes(x = FY, y =Days, color=Observation, group=Observation))+geom_line(lwd=1.2, lty=2)+geom_point(size=3.5, shape=21, color = 'black', aes(fill =Observation))+theme_bw()+geom_label_repel(aes(label = Days), color='black' )+ggtitle('AQI (Sub-Index)')+theme(axis.text = element_text(face = 'bold', size=9, color='black'), axis.title =element_text(face = 'bold', size=10, color='black'), legend.position = 'bottom', plot.title = element_text(hjust=0.5, face = 'bold', size=12, color='black'))+scale_color_manual(values = c('darkgreen','blue'))+scale_fill_manual(values = c('darkgreen', 'blue'))
+}else {
+  AQ_data %>% filter(Mean_PM <= 90 & Outlier =='No') %>% group_by(FY) %>% count(name ='Good Days') %>% left_join(AQ_data %>% filter(Outlier =='No') %>% group_by(FY) %>% count(name ='Observed Days'), by = 'FY') %>% pivot_longer(cols = 2:3, names_to = 'Observation', values_to = 'Days') %>% mutate_if(is.character, as.factor)%>% ggplot(aes(x = FY, y =Days, color=Observation, group=Observation))+geom_line(lwd=1.2, lty=2)+geom_point(size=3.5, shape=21, color = 'black', aes(fill =Observation))+theme_bw()+geom_label_repel(aes(label = Days), color='black' )+ ggtitle('AQI (Sub-Index)')+theme(axis.text = element_text(face = 'bold', size=9, color='black'), axis.title =element_text(face = 'bold', size=10, color='black'), legend.position = 'bottom', plot.title = element_text(hjust=0.5, face = 'bold', size=12, color='black'))+scale_color_manual(values = c('darkgreen', 'blue'))+scale_fill_manual(values = c('darkgreen', 'blue'))
+}
+
+```
+
+[**Let us now analyze the performance of individual stations.**]{.underline}
+
+```{r warning=FALSE, fig.height=8,fig.width=8}
+
+##Calculating the missing information
+miss_data = AQ_data_copy %>% left_join(AQ_data_FY %>% select(1,3), by= 'Date') %>% group_by(FY) %>% summarise_at(vars(-c(Date)),funs(sum(is.na(.))*100/n())) 
+
+##Cleaning the station names
+colnames(miss_data) = c('FY', str_split_fixed(stations, pattern =",", n=2)[1:length(stations)])
+
+##Plotting the missing information details for each stations
+miss_data %>% pivot_longer(cols = -c(FY), names_to = 'Stations', values_to ='Missing') %>% mutate_at(vars(Missing), ~round(./100,digits=2)) %>% mutate_at(vars(Stations), ~str_split(.,pattern = "_"))%>% unnest(cols =c(Stations)) %>% mutate(status = if_else(Missing==1, 'No Station', NULL)) %>%  ggplot(aes(x = FY, y=Missing))+geom_col(colour = 'black', fill ='blue', alpha=0.6)+facet_wrap(~Stations)+scale_y_continuous(labels = scales::label_percent())+ggtitle('Missing Informations for each stations over the FY')+theme_bw()+theme(axis.text.x = element_text(face='bold', size=8, angle = 90, vjust=0.4), axis.text.y = element_text(face='bold', size=10, color = 'black'), strip.text =element_text(face='bold', size=10, color = 'black'), plot.title = element_text(hjust=0.5, face = 'bold', size=12, color='black'))+geom_hline(yintercept = 0.25, lty=2)+geom_text(aes(label = status), angle = 90, fontface= 'bold', hjust =1.2, colour = 'white', size=4.5)
+  
+```
+
+[**Lets have some insights in to the operational period for individual stations. Stations with Minimum 75% data availability in the respective FY.**]{.underline}
+
+```{r label ='Lets have some insights in to the operational period for individual stations and Stations with Minimum 75% data availability in the respective FY'}
+
+##Assign '1' for Missing information less than 25% and '0' otherwise
+station_rel= ifelse(miss_data[ ,-c(1)]>25,0,1)
+
+##Performing row sum to calculate the total '1's
+station_details = data.frame(apply(station_rel, 1, sum))
+
+##Binding all the details to a dataframe
+p = data.frame(cbind(miss_data$FY,station_rel)) %>% rename ('FY' =1) %>% gather(key ='Stations', value = 'vals', -FY)%>% filter(vals==1) %>% mutate_at(vars(Stations), ~str_split(.,pattern = "_")) %>% unnest(cols = c(Stations)) %>%  group_by(FY) %>% mutate(Station = paste("[",Stations,"]",collapse = " , ")) %>% select(-c(Stations,vals)) %>% unique() 
+
+##Binding the row summed dataframe to FY database
+station_details = cbind(miss_data$FY, station_details)
+
+##Assigning the column names
+colnames(station_details) = c('FY', 'Total Stations')
+
+##Merging the all the dataframes
+merge(station_details, p, by = 'FY', all=TRUE) %>% kable()
+```
+
+```{r label ='Lets interpolate the missing data using the function mentioned in chunk 11 to 13', include=FALSE}
+
+p = colnames(AQ_data_copy)[-1]
+k = AQ_data_copy[1,'Date']$Date
+k_date = seq.POSIXt(k, to = AQ_data_copy[dim(AQ_data_copy)[1],'Date']$Date, by='day')
+AQ_data_copy_interpolated = as.data.frame(k_date)
+colnames(AQ_data_copy_interpolated) = c('Date')
+AQ_data_copy['FY'] = AQ_data_FY$FY
+
+##Run the functions as repeated previously in chunk 
+for(i in p){
+  info = AQ_data_copy[ ,c('Date',i,'FY')]
+  colnames(info) = c('Date','Mean_PM','FY')
+  if (length(which(is.na(info$Mean_PM))) != dim(info)[1]){
+  info = preprocessing(info) %>% final_processing() %>% consecutive_nan() %>% FY_Quarters() %>% select(1,2,3,6) %>% mutate_if(is.character, as.factor)%>% Min_quarterly_req() %>% Outliers() %>% ungroup() %>% select(1,2)   
+  colnames(info) = c('Date', i)
+    AQ_data_copy_interpolated = merge(AQ_data_copy_interpolated, info, by = 'Date', all=TRUE)
+  }
+  }
+
+AQ_data_copy =  AQ_data_copy_interpolated 
+
+##Revising the Station names
+col_names = str_split_fixed(colnames(AQ_data_copy), pattern = "_", n=2)
+col_names = str_split_fixed(col_names[dim(AQ_data_copy)[2]+2 : length(col_names)], pattern = ",", n=2)[1:dim(AQ_data_copy)[2]-1]
+
+colnames(AQ_data_copy) = c('Date', col_names)
+AQ_data_copy
+```
+
+[**Let us find the overall PM trend over the subsequent FY for each stations. (Note Data unavailable for greater than 25%of FY shall be eliminated).**]{.underline}
+
+```{r warning=FALSE, fig.height=8,fig.width=8}
+
+##Generating dataframe by performing mathematical calculation
+Stationwise_FY = AQ_data_copy %>% left_join(AQ_data_FY %>% select(1,3), by= 'Date') %>% group_by(FY) %>% summarise_at(vars(-c(Date)), funs(mean(., na.rm=TRUE))) %>% mutate_at(vars(-c(FY)), ~round(., digits=2))
+
+##Displaying the plot
+Stationwise_FY %>% pivot_longer(cols =-c(FY), names_to = 'Stations', values_to = 'Mean') %>% left_join(miss_data%>% pivot_longer(cols =-c(FY), names_to = 'Stations', values_to = 'Missing_percent'), by=c('FY', 'Stations')) %>% filter(Missing_percent<=25)%>% ggplot(aes(x = FY, y=Mean))+geom_point(shape=21,size=5, fill='red', stroke = 1.5)+geom_line(color='black',lty=2, lwd=1.0, aes(group=1))+facet_wrap(~Stations, ncol=1, scales = 'free_y')+geom_label_repel(aes(label = Mean,fontface = 'bold'), size=3.5)+ggtitle(label = 'Pollutant behaviour across each stations over the FY')+theme_bw()+theme(axis.text = element_text(face='bold', size=10, color = 'black'), strip.text =element_text(face='bold', size=10, color='black'),plot.title = element_text(hjust=0.5, face = 'bold', size=12, color='black'))
+
+```
+
+[**Analyzing how the data retrieved by individual stations behaves each quarter over the FY.**]{.underline}
+
+```{r error=FALSE, fig.height=9, fig.width=10, message=FALSE, warning=FALSE,tidy=TRUE}
+
+AQ_data_copy %>% left_join(AQ_data_FY %>% select(1,3), by= 'Date') %>% FY_Quarters() %>% separate(col = Quarter_year, sep= "_", into = c('Quarter', 'todel')) %>% select(-todel) %>% mutate_if(is.character, as.factor) %>% group_by(FY,Quarter) %>% summarise_at(vars(-c(Date)), funs(mean(.,na.rm=TRUE))) %>% mutate_at(vars(-c(FY,Quarter)), ~round(.,digits=1))%>%pivot_longer(!c(FY, Quarter, Month), names_to = 'Stations', values_to = 'Mean') %>% mutate_if(is.character, as.factor) %>% ggplot(aes(x=FY, y =Mean, fill=FY))+geom_col(col='black')+ facet_wrap(Stations~Quarter, scales = 'free_y')+theme_bw()+scale_fill_discrete(name = 'Financial Year')+ggtitle('Pollutant behvaiour at individual stations for each quarter over FY')+theme(axis.text.y = element_text(face='bold', size=10, color='black'), axis.text.x = element_blank(), strip.text = element_text(face='bold', size=10, color='black'),legend.text = element_text(face='bold', size=10, color='black'), legend.title = element_text(face='bold', size=12, color='black'), axis.title.y = element_text(face='bold', size=12, color='black'), axis.title.x = element_blank(), legend.position = 'bottom', plot.title = element_text(hjust=0.5, face = 'bold', size=12, color='black'))+geom_label_repel(aes(label = Mean))
+```
+
+**Hope this R script was instrumental in analyzing the pollutant behaviour over the period across stations.**
