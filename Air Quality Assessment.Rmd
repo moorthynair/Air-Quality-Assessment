@@ -139,7 +139,7 @@ AQ_data
 
 AQ_data = AQ_data %>% pivot_wider(id_cols = 'Date', values_from =c('PM10','PM2.5'), names_from = 'Station',names_sep = '_') %>% filter(Date >= Startdate & Date<=Enddate)
 
-AQ_data
+AQ_data = AQ_data %>% mutate_at(vars(-Date), ~replace(.,.<=0, NA))
 
 ```
 
@@ -375,7 +375,7 @@ AQ_data  %>% filter(Outlier=='No') %>% mutate(Quarter = str_sub(Quarter_year, st
 ```{r label = 'Drop outliers and Compute the Mean of the pollutant for each FY'}
 
 ##Developing dataframe by performing necessary mathematical observations
-obs = AQ_data %>% group_by(FY) %>% summarise(Mean_PM = mean(Mean_PM, na.rm=TRUE), Total_observation = n()) %>% mutate(Mean_PM = round(Mean_PM,2))%>% left_join(AQ_data_FY %>% group_by(FY) %>% count(name = 'Total_Days'), by = 'FY') %>% mutate(Data_availability_percent = Total_observation*100/Total_Days, Data_availability_percent = round(Data_availability_percent)) %>% select(1,2,3,5)%>% mutate_if(is.character, as.factor)
+obs = AQ_data %>% filter(!is.na(Mean_PM)) %>% group_by(FY) %>% summarise(Mean_PM = mean(Mean_PM, na.rm=TRUE), Total_observation = n()) %>% ungroup() %>% mutate(Mean_PM = round(Mean_PM,2))%>% left_join(AQ_data_FY %>% group_by(FY) %>% count(name = 'Total_Days'), by = 'FY') %>% mutate(Data_availability_percent = Total_observation*100/Total_Days, Data_availability_percent = round(Data_availability_percent)) %>% select(1,2,3,5)%>% mutate_if(is.character, as.factor)
 
 
 ##Plotting the graph
