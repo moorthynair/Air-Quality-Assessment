@@ -1,6 +1,6 @@
 # Air Quality Assessment over Indian Cities
 
-**The chunk of code can be used to perform detailed air quality assessment using the Continous Ambient Air Quality Monitoring Stations (CAAQMS) data of Indian cities for effective decision making.**
+**The chunk of code is to facilitate staekolders for assessing the air quality using the Continous Ambient Air Quality Monitoring Stations (CAAQMS) data of Indian cities for effective decision making.**
 
 **The codes are developed using R and Python**
 
